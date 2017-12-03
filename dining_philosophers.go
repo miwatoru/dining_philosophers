@@ -9,37 +9,52 @@ func sleep() {
 	time.Sleep(time.Millisecond * time.Duration(rand.Intn(100)))
 }
 
-func philosopher(name string, l *sync.Mutex, r *sync.Mutex, q chan bool, log chan string) {
+func philosopher(name string, a *sync.Mutex, b *sync.Mutex, q chan bool, log chan string, req chan int, ack chan bool) {
 	log <- name + ":start"
 	for i := 0; i < 100; i++ {
 		sleep()
-		l.Lock()
+		for {
+			req <- -1
+			if <- ack {
+				break
+			}
+			sleep()
+		}
+		a.Lock()
 		log <- name + ":left"
 		sleep()
-		r.Lock()
+		b.Lock()
+		req <- 1
 		log <- name + ":right"
 		sleep()
 		log <- name + ":done"
-		l.Unlock()
-		r.Unlock()
+		a.Unlock()
+		b.Unlock()
 	}
 	log <- name + ":finish"
 	q <- true
 }
 
-func philosopherL(name string, l *sync.Mutex, r *sync.Mutex, q chan bool, log chan string) {
+func philosopherL(name string, a *sync.Mutex, b *sync.Mutex, q chan bool, log chan string, req chan int, ack chan bool) {
 	log <- name + ":start"
 	for i := 0; i < 100; i++ {
 		sleep()
-		r.Lock()
+		for {
+			req <- -1
+			if <- ack {
+				break
+			}
+			sleep()
+		}
+		b.Lock()
 		log <- name + ":right"
 		sleep()
-		l.Lock()
+		a.Lock()
 		log <- name + ":left"
 		sleep()
 		log <- name + ":done"
-		l.Unlock()
-		r.Unlock()
+		a.Unlock()
+		b.Unlock()
 	}
 	log <- name + ":finish"
 	q <- true
@@ -103,22 +118,40 @@ func monitor(log chan string) {
 	}
 }
 
+func count(req chan int, ack chan bool){
+	count := 5
+	for {
+		r := <- req
+		if r == -1 {
+			if count == 1 {
+				ack <- false
+				fmt.Println("Wait!!")
+			} else {
+				count--
+				ack <- true
+			}
+		} else if r == 1 {
+			count++
+		}
+	}
+}
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
-	var f []*sync.Mutex
-	for i := 0; i < 5; i++ {
-		f = append(f, new(sync.Mutex))
-	}
+	m := []*sync.Mutex{new(sync.Mutex), new(sync.Mutex), new(sync.Mutex), new(sync.Mutex), new(sync.Mutex)}
 	q := make(chan bool)
 	log := make(chan string)
+	ack := make(chan bool)
+	req := make(chan int)
 
 	go monitor(log)
+	go count(req, ack)
 
-	go philosopher("A", f[0], f[1], q, log)
-	go philosopher("B", f[1], f[2], q, log)
-	go philosopher("C", f[2], f[3], q, log)
-	go philosopher("D", f[3], f[4], q, log)
-	go philosopher("E", f[4], f[0], q, log)
+	go philosopher("A", m[0], m[1], q, log, req, ack)
+	go philosopher("B", m[1], m[2], q, log, req, ack)
+	go philosopher("C", m[2], m[3], q, log, req, ack)
+	go philosopher("D", m[3], m[4], q, log, req, ack)
+	go philosopher("E", m[4], m[0], q, log, req, ack)
 
 	for i := 0; i < 5; i++ {
 		<-q
